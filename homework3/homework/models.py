@@ -26,26 +26,54 @@ class Classifier(nn.Module):
         self.register_buffer("input_mean", torch.as_tensor(INPUT_MEAN))
         self.register_buffer("input_std", torch.as_tensor(INPUT_STD))
 
+        # Convolutional layers
         self.features = nn.Sequential(
-            nn.Conv2d(in_channels, 32, kernel_size=3, stride=1, padding=1),  # (B,32,64,64)
+            # First conv block
+            nn.Conv2d(in_channels, 32, kernel_size=3, padding=1),
             nn.BatchNorm2d(32),
-            nn.ReLU(),
-            nn.MaxPool2d(2),  # (B,32,32,32)
-            nn.Conv2d(32, 64, kernel_size=3, stride=1, padding=1),           # (B,64,32,32)
+            nn.ReLU(inplace=True),
+            nn.Conv2d(32, 32, kernel_size=3, padding=1),
+            nn.BatchNorm2d(32),
+            nn.ReLU(inplace=True),
+            nn.MaxPool2d(2, 2),  # 64x64 -> 32x32
+            
+            # Second conv block
+            nn.Conv2d(32, 64, kernel_size=3, padding=1),
             nn.BatchNorm2d(64),
-            nn.ReLU(),
-            nn.MaxPool2d(2),  # (B,64,16,16)
-            nn.Conv2d(64, 128, kernel_size=3, stride=1, padding=1),          # (B,128,16,16)
+            nn.ReLU(inplace=True),
+            nn.Conv2d(64, 64, kernel_size=3, padding=1),
+            nn.BatchNorm2d(64),
+            nn.ReLU(inplace=True),
+            nn.MaxPool2d(2, 2),  # 32x32 -> 16x16
+            
+            # Third conv block
+            nn.Conv2d(64, 128, kernel_size=3, padding=1),
             nn.BatchNorm2d(128),
-            nn.ReLU(),
-            nn.MaxPool2d(2),  # (B,128,8,8)
+            nn.ReLU(inplace=True),
+            nn.Conv2d(128, 128, kernel_size=3, padding=1),
+            nn.BatchNorm2d(128),
+            nn.ReLU(inplace=True),
+            nn.MaxPool2d(2, 2),  # 16x16 -> 8x8
+            
+            # Fourth conv block
+            nn.Conv2d(128, 256, kernel_size=3, padding=1),
+            nn.BatchNorm2d(256),
+            nn.ReLU(inplace=True),
+            nn.Conv2d(256, 256, kernel_size=3, padding=1),
+            nn.BatchNorm2d(256),
+            nn.ReLU(inplace=True),
+            nn.MaxPool2d(2, 2),  # 8x8 -> 4x4
         )
+        
+        # Classifier head
         self.classifier = nn.Sequential(
+            nn.AdaptiveAvgPool2d((1, 1)),  # Global average pooling
             nn.Flatten(),
-            nn.Linear(128 * 8 * 8, 256),
-            nn.ReLU(),
             nn.Dropout(0.5),
-            nn.Linear(256, num_classes)
+            nn.Linear(256, 128),
+            nn.ReLU(inplace=True),
+            nn.Dropout(0.5),
+            nn.Linear(128, num_classes)
         )
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
@@ -59,10 +87,10 @@ class Classifier(nn.Module):
         # optional: normalizes the input
         z = (x - self.input_mean[None, :, None, None]) / self.input_std[None, :, None, None]
 
-        # TODO: replace with actual forward pass
-        # logits = torch.randn(x.size(0), 6)
+        # Forward pass through the network
         features = self.features(z)
         logits = self.classifier(features)
+
         return logits
 
     def predict(self, x: torch.Tensor) -> torch.Tensor:
@@ -98,40 +126,109 @@ class Detector(torch.nn.Module):
         self.register_buffer("input_mean", torch.as_tensor(INPUT_MEAN))
         self.register_buffer("input_std", torch.as_tensor(INPUT_STD))
 
-        # TODO: implement
-        #pass
-        # Shared feature extractor
-        self.features = nn.Sequential(
-            nn.Conv2d(in_channels, 32, kernel_size=3, padding=1),
+        # Encoder (shared features) - Balanced for speed and performance
+        self.encoder = nn.Sequential(
+            # First conv block
+            nn.Conv2d(in_channels, 16, kernel_size=3, padding=1),
+            nn.BatchNorm2d(16),
+            nn.ReLU(inplace=True),
+            nn.Conv2d(16, 16, kernel_size=3, padding=1),
+            nn.BatchNorm2d(16),
+            nn.ReLU(inplace=True),
+            nn.MaxPool2d(2, 2),  # 64x64 -> 32x32
+            
+            # Second conv block
+            nn.Conv2d(16, 32, kernel_size=3, padding=1),
             nn.BatchNorm2d(32),
-            nn.ReLU(),
-            nn.MaxPool2d(2),  # (B,32,32,32)
+            nn.ReLU(inplace=True),
+            nn.Conv2d(32, 32, kernel_size=3, padding=1),
+            nn.BatchNorm2d(32),
+            nn.ReLU(inplace=True),
+            nn.MaxPool2d(2, 2),  # 32x32 -> 16x16
+            
+            # Third conv block
             nn.Conv2d(32, 64, kernel_size=3, padding=1),
             nn.BatchNorm2d(64),
-            nn.ReLU(),
-            nn.MaxPool2d(2),  # (B,64,16,16)
+            nn.ReLU(inplace=True),
+            nn.Conv2d(64, 64, kernel_size=3, padding=1),
+            nn.BatchNorm2d(64),
+            nn.ReLU(inplace=True),
+            nn.MaxPool2d(2, 2),  # 16x16 -> 8x8
+            
+            # Fourth conv block
             nn.Conv2d(64, 128, kernel_size=3, padding=1),
             nn.BatchNorm2d(128),
-            nn.ReLU(),
-            nn.MaxPool2d(2),  # (B,128,8,8)
+            nn.ReLU(inplace=True),
+            nn.Conv2d(128, 128, kernel_size=3, padding=1),
+            nn.BatchNorm2d(128),
+            nn.ReLU(inplace=True),
+            nn.MaxPool2d(2, 2),  # 8x8 -> 4x4
         )
-
-        # Segmentation head
-        self.segmentation_head = nn.Sequential(
-            nn.ConvTranspose2d(128, 64, kernel_size=2, stride=2),  # (B,64,16,16)
-            nn.ReLU(),
-            nn.ConvTranspose2d(64, 32, kernel_size=2, stride=2),   # (B,32,32,32)
-            nn.ReLU(),
-            nn.ConvTranspose2d(32, num_classes, kernel_size=2, stride=2),  # (B,num_classes,64,64)
-        )
-
-        # Depth head
-        self.depth_head = nn.Sequential(
+        
+        # Segmentation decoder (U-Net style) - Balanced for speed and performance
+        self.seg_decoder = nn.Sequential(
+            # Upsample 4x4 -> 8x8
             nn.ConvTranspose2d(128, 64, kernel_size=2, stride=2),
-            nn.ReLU(),
+            nn.BatchNorm2d(64),
+            nn.ReLU(inplace=True),
+            nn.Conv2d(64, 64, kernel_size=3, padding=1),
+            nn.BatchNorm2d(64),
+            nn.ReLU(inplace=True),
+            
+            # Upsample 8x8 -> 16x16
             nn.ConvTranspose2d(64, 32, kernel_size=2, stride=2),
-            nn.ReLU(),
-            nn.ConvTranspose2d(32, 1, kernel_size=2, stride=2),  # (B,1,64,64)
+            nn.BatchNorm2d(32),
+            nn.ReLU(inplace=True),
+            nn.Conv2d(32, 32, kernel_size=3, padding=1),
+            nn.BatchNorm2d(32),
+            nn.ReLU(inplace=True),
+            
+            # Upsample 16x16 -> 32x32
+            nn.ConvTranspose2d(32, 16, kernel_size=2, stride=2),
+            nn.BatchNorm2d(16),
+            nn.ReLU(inplace=True),
+            nn.Conv2d(16, 16, kernel_size=3, padding=1),
+            nn.BatchNorm2d(16),
+            nn.ReLU(inplace=True),
+            
+            # Upsample 32x32 -> 64x64
+            nn.ConvTranspose2d(16, 8, kernel_size=2, stride=2),
+            nn.BatchNorm2d(8),
+            nn.ReLU(inplace=True),
+            nn.Conv2d(8, num_classes, kernel_size=3, padding=1),
+        )
+        
+        # Depth decoder (similar structure) - Balanced for speed and performance
+        self.depth_decoder = nn.Sequential(
+            # Upsample 4x4 -> 8x8
+            nn.ConvTranspose2d(128, 64, kernel_size=2, stride=2),
+            nn.BatchNorm2d(64),
+            nn.ReLU(inplace=True),
+            nn.Conv2d(64, 64, kernel_size=3, padding=1),
+            nn.BatchNorm2d(64),
+            nn.ReLU(inplace=True),
+            
+            # Upsample 8x8 -> 16x16
+            nn.ConvTranspose2d(64, 32, kernel_size=2, stride=2),
+            nn.BatchNorm2d(32),
+            nn.ReLU(inplace=True),
+            nn.Conv2d(32, 32, kernel_size=3, padding=1),
+            nn.BatchNorm2d(32),
+            nn.ReLU(inplace=True),
+            
+            # Upsample 16x16 -> 32x32
+            nn.ConvTranspose2d(32, 16, kernel_size=2, stride=2),
+            nn.BatchNorm2d(16),
+            nn.ReLU(inplace=True),
+            nn.Conv2d(16, 16, kernel_size=3, padding=1),
+            nn.BatchNorm2d(16),
+            nn.ReLU(inplace=True),
+            
+            # Upsample 32x32 -> 64x64
+            nn.ConvTranspose2d(16, 8, kernel_size=2, stride=2),
+            nn.BatchNorm2d(8),
+            nn.ReLU(inplace=True),
+            nn.Conv2d(8, 1, kernel_size=3, padding=1),  # Single channel for depth
         )
 
     def forward(self, x: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
@@ -150,13 +247,17 @@ class Detector(torch.nn.Module):
         # optional: normalizes the input
         z = (x - self.input_mean[None, :, None, None]) / self.input_std[None, :, None, None]
 
-        # TODO: replace with actual forward pass
-        # logits = torch.randn(x.size(0), 3, x.size(2), x.size(3))
-        # raw_depth = torch.rand(x.size(0), x.size(2), x.size(3))
-        features = self.features(z)
-        logits = self.segmentation_head(features)  # (b, num_classes, h, w)
-        raw_depth = self.depth_head(features).squeeze(1)  # (b, h, w)
-        return logits, raw_depth
+        # Forward pass through encoder
+        features = self.encoder(z)
+        
+        # Forward pass through decoders
+        seg_logits = self.seg_decoder(features)
+        depth_pred = self.depth_decoder(features)
+        
+        # Remove the channel dimension from depth (B, 1, H, W) -> (B, H, W)
+        depth_pred = depth_pred.squeeze(1)
+
+        return seg_logits, depth_pred
 
     def predict(self, x: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
         """
